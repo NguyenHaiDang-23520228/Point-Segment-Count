@@ -1,104 +1,87 @@
 ---
-name: PseCo Implementation Plan
-overview: "Build a working Zero-Shot Object Counting and Segmentation pipeline following the PseCo framework: Point (localization) -> Segment (SAM) -> Count (CLIP), evaluated on FSC-147 dataset."
+name: PseCo Zero-Shot Research & Improvement Plan
+overview: "Phase 1: Reproduce PseCo Zero-Shot Baseline (SAM1). Phase 2: Explainable AI analysis via Grad-CAM to identify Concept Drift. Phase 3: Integrate SAM2 to fix mask adhesion, followed by strict Ablation study on FSC-147."
 todos:
-  - id: setup-env
-    content: "Phase 0: Clone PseCo repo, set up Python env, install dependencies, download FSC-147 dataset and pretrained model weights (SAM, CLIP, PseCo localizer)"
+  # Phần Baseline (Đã hoàn thành)
+  - id: baseline-setup
+    content: "Phase 0: Setup env, download FSC-147, SAM1, CLIP weights."
     status: completed
-  - id: point-localization
-    content: "Phase 1: Implement/adapt the heatmap decoder from PseCo for object center localization and peak detection to generate point prompts"
+  - id: baseline-point
+    content: "Phase 1: Run Point Decoder for class-agnostic localization."
     status: completed
-  - id: sam-segmentation
-    content: "Phase 2: Integrate SAM -- feed point prompts into SamPredictor, collect mask proposals, apply score thresholding and NMS"
+  - id: baseline-segment
+    content: "Phase 2: Run SAM1 Mask Decoder to generate hierarchical masks."
     status: completed
-  - id: clip-counting
-    content: "Phase 3: Implement CLIP-based mask classification (crop + encode + cosine similarity) and HKD filtering to produce final count"
+  - id: baseline-count
+    content: "Phase 3: Run CLIP Text-Image matching (Zero-Shot only) & HKD filtering."
     status: completed
-  - id: evaluation
-    content: "Phase 4: Implement MAE/RMSE metrics and evaluate the full pipeline on FSC-147 val/test split"
+  - id: baseline-eval
+    content: "Phase 4: Evaluate Baseline (SAM1) -> MAE=18.11, RMSE=130.55 on Test set."
     status: completed
-  - id: demo-script
-    content: "Phase 5: Build an inference/demo script that takes image + text and outputs count + visualized masks"
-    status: completed
+  # Phần Nghiên cứu & Cải tiến (Sẽ làm)
+  - id: gradcam-analysis
+    content: "Phase 5: Apply Grad-CAM on CLIP similarity logit to visualize 'Concept Drift' when shifting Text Prompts."
+    status: pending
+  - id: sam2-integration
+    content: "Phase 6: Replace SAM1 with SAM2. Ensure exact same Point Prompts (same seed) are fed into SAM2."
+    status: pending
+  - id: ablation-study
+    content: "Phase 7: Run strict Ablation experiment (SAM1 vs SAM2). Measure MAE, RMSE, FPS, and VRAM usage."
+    status: pending
+  - id: curated-demo
+    content: "Phase 8: Select intentional demo images (Mask adhesion, Prompt shift, Failure case) for final report."
+    status: pending
 isProject: false
 ---
+Nghiên cứu và Cải tiến Đếm Đối tượng Zero-Shot PseCo
+Goal
+Không chỉ tái hiện mô hình PseCo (Zero-Shot), mà phân tích điểm yếu của nó khi đối mặt với sự trôi khái niệm (Concept Drift) khi đổi Text Prompt, và đề xuất cải tiến bằng cách nâng cấp linh kiện phân đoạn từ SAM 1 lên SAM 2 để giảm lỗi dính mask (Mask Adhesion Error).
 
-# PseCo Zero-Shot Counting & Segmentation -- Implementation Plan
+PART I: BASELINE REPRODUCTION (Hoàn thành)
+(Phần này giữ nguyên logic gốc của tác giả, chỉ tập trung vào Text Prompt)
 
-## Goal
+Phase 0-4: Đã chạy xong
+Đã chạy thành công luồng: Image Encoder -> Point Decoder -> SAM1 Mask Decoder -> CLIP Text Embeddings -> Cosine Similarity -> Count.
+Kết quả Baseline trên FSC-147 (Test): MAE = 18.11, RMSE = 130.55.
+Phát hiện thực tế: Đổi Text Prompt (VD: từ "apple" sang "leaf") khiến mô hình đếm sai, Bounding Box/Mask không chuẩn xác do SAM1 bị dính các vật thể nhỏ/sát nhau.
+PART II: EXPLAINABLE AI & ANALYSIS (Phase 5)
+Mục tiêu: Chứng minh lý thuyết "Tại sao đổi prompt lại sai" không phải do code lỗi, mà do đặc thù của CLIP + SAM1.
 
-Build the 3-step pipeline described in the assignment: **Point -> Segment -> Count**, capable of taking an image + text prompt (e.g. "nhung qua tao") and outputting (1) a count and (2) per-object segmentation masks. Evaluate on FSC-147.
+Phase 5: Grad-CAM Targeted Analysis
+Thư viện sử dụng: pytorch-gradcam
+Target Layer & Model: Phải gắn Grad-CAM vào CLIP Image Encoder, cụ thể là trích xuất Gradient của Cosine Similarity Score giữa Image Feature (của mask đang xét) và Text Feature (của từ khóa nhập vào).
+Thực nghiệm:
+Chạy 1 bức ảnh có 2 đối tượng (VD: Quả táo và Cái lá).
+Nhập Prompt 1: "A photo of an apple". Chụp Grad-CAM (Vùng đỏ phải nằm ở quả táo).
+Nhập Prompt 2: "A photo of a leaf". Chụp Grad-CAM.
+Phân tích kỳ vọng: Nếu vùng đỏ nhảy lung tung hoặc bao phủ cả cái lá khi prompt là "apple", chứng tỏ SAM1 cắt mask bị dính lá → CLIP bị nhiễu đặc trưng (Concept Drift).
+PART III: IMPROVEMENT & ABLATION (Phase 6 & 7)
+Mục tiêu: Vá lỗi "Mask dính" bằng SAM2, nhưng phải chứng minh bằng Ablation nghiêm ngặt.
 
-## Architecture Overview
+Phase 6: Tích hợp SAM 2
+Nguyên tắc cốt lõi (Ablation Control): TUYỆT ĐỐI KHÔNG đổi bất kỳ thông số nào ở Phase 1 (Point Decoder). Phải lưu lại exact tọa độ các điểm (Point Prompts) mà Baseline (SAM1) đã sinh ra, và ném đúng các điểm đó vào SAM2.
+Thay đổi duy nhất: Thay thư viện segment_anything bằng sam2. Dùng SAM2 Predictor để nhận Point Prompts và sinh ra Mask Proposals mới.
+Giữ nguyên bộ lọc CLIP và HKD ở Phase 3.
+Phase 7: Thí nghiệm Ablation Khắt khe
+Chạy lại toàn bộ FSC-147 Test set với cấu hình SAM2.Bảng báo cáo phải có đủ các cột sau:
 
-```mermaid
-flowchart LR
-    Input["Image + Text Prompt"] --> Step1
-    subgraph step1 [Step 1: Point]
-        Step1["Heatmap Decoder\n(PseCo Localizer)"] --> Points["Point Prompts\n(x,y coordinates)"]
-    end
-    Points --> Step2
-    subgraph step2 [Step 2: Segment]
-        Step2["SAM\n(Segment Anything)"] --> Masks["Mask Proposals"]
-    end
-    Masks --> Step3
-    subgraph step3 [Step 3: Count]
-        Step3["CLIP Classifier\n+ HKD Filter"] --> Output["Final Count\n+ Filtered Masks"]
-    end
-```
+Method: PseCo (SAM1) vs. PseCo (SAM2 - Ours)
+MAE ↓ & RMSE ↓: So sánh chỉ số đếm. (Lưu ý: Không hứa hẹn sẽ giảm mạnh, chỉ báo cáo số liệu thực tế).
+Inference Speed (FPS) ↓: Đo thời gian chạy mỗi ảnh. (SAM2 sẽ chậm hơn, phải trung thực báo cáo đây là đánh đổi).
+VRAM Usage (GB) ↑: Đo bộ nhớ tải (SAM2 nặng hơn).
+Mask Adhesion Rate (Tùy chọn): Đếm số lượng mask bị dính (IoU với nhau > 0.5) ở SAM1 so với SAM2 để chứng minh mask thực sự đẹp hơn.
+PART IV: REPORTING & DEMO (Phase 8)
+Mục tiêu: Trình bày kết quả có chủ đích, không "cherry-pick" 100% case tốt.
 
-## Phase 0: Environment and Data Setup
+Phase 8: Curated Demo Images
+Chọn ra khoảng 5-6 bức ảnh đưa vào Báo cáo/Slide thuyết trình:
 
-- Clone the official PseCo repo: `https://github.com/Hzzone/PseCo`
-- Set up a Python environment (Python 3.10+, PyTorch, CUDA)
-- Install dependencies: `segment-anything`, `open_clip_torch` (or `clip`), `torchvision`, `opencv-python`, `scipy`, etc.
-- Download FSC-147 dataset (images + dot annotations) -- either from Hugging Face (`huggingface-cli download Hzzone/PseCo`) or from the official FSC-147 source
-- Download pretrained weights: SAM ViT-H, CLIP ViT-B/16 (or ViT-L/14), PseCo localizer checkpoint
-
-## Phase 1: Point -- Object Localization
-
-- Implement or adapt PseCo's **heatmap decoder** that takes an image and produces a density/heatmap
-- Apply **peak detection** (e.g. `scipy.ndimage` local maxima or non-maximum suppression) on the heatmap to extract `(x, y)` point coordinates
-- These are the "point prompts" for SAM
-- Key concern: balance between recall (not missing small/crowded objects) and precision (not generating too many spurious points)
-- Reference: PseCo repo's localization module
-
-## Phase 2: Segment -- SAM Mask Generation
-
-- Load SAM (ViT-H recommended) using the `segment_anything` library
-- For each point prompt from Phase 1, call `SamPredictor.predict()` with the point as input
-- SAM returns multiple mask proposals per point (typically 3 at different granularities) -- collect all proposals
-- Post-process: apply score thresholding and basic NMS to reduce redundant masks
-
-## Phase 3: Count -- CLIP Classification + HKD Filtering
-
-- **CLIP filtering**: For each mask proposal, crop/mask the region from the original image, encode it with CLIP's image encoder. Encode the user's text prompt with CLIP's text encoder. Compute **cosine similarity** -- keep masks above a threshold
-- **Hierarchical Knowledge Distillation (HKD)**: This is PseCo's core contribution. Among the remaining masks, some may be hierarchically nested (e.g. "wheel" mask inside "car" mask). HKD trains a lightweight classifier to pick the correct granularity level. Implement or adapt from PseCo repo
-- Final count = number of filtered masks that pass both CLIP and HKD checks
-
-## Phase 4: Evaluation on FSC-147
-
-- Implement evaluation metrics:
-  - **MAE** = (1/N) * sum(|predicted_count - gt_count|)
-  - **RMSE** = sqrt((1/N) * sum((predicted_count - gt_count)^2))
-- Run inference on FSC-147 val/test split
-- Report MAE and RMSE numbers
-- Optionally visualize: overlay masks on input images, show count
-
-## Phase 5: Demo / Inference Script
-
-- Build a simple inference script: `python demo.py --image path/to/image.jpg --text "nhung qua tao"`
-- Output: annotated image with masks drawn + printed count
-- Optionally build a Gradio demo for interactive use
-
-## Key Reference Repos
-
-- **PseCo (primary)**: [github.com/Hzzone/PseCo](https://github.com/Hzzone/PseCo) -- the main codebase to adapt
-- **CounTX**: [github.com/niki-amini-naieni/CounTX](https://github.com/niki-amini-naieni/CounTX) -- zero-shot counting reference
-- **CLIP-Count**: [github.com/songrise/clip-count](https://github.com/songrise/clip-count) -- CLIP-based counting reference
-
-## Hardware Requirements
-
-- GPU with at least 12GB VRAM recommended (SAM ViT-H is large)
-- Can use SAM ViT-B for lighter setup if GPU is limited
-- CLIP ViT-B/16 is relatively lightweight
+Case 1 & 2 (Mask Adhesion Fix): Ảnh đông đúc. Trình bày Side-by-side: SAM1 cắt dính bét → SAM2 cắt rời rạc rõ ràng → Đếm đúng.
+Case 3 (Concept Drift Visualization): Ảnh mà SAM1 cắt dính. Trình bày Side-by-side: Ảnh gốc → Ảnh có Grad-CAM overlay (chỉ ra vùng CLIP đang nhìn sai do mask dính).
+Case 4 (Failure Case - RẤT QUAN TRỌNG): 1 bức ảnh mà SAM2 cắt đẹp hơn SAM1, nhưng VẪN ĐẾM SAI.
+Ghi chú trong báo cáo: "Điều này chứng tỏ việc cải thiện chất lượng Mask (điều kiện cần) chưa đủ để giải quyết triệt để bài toán Zero-shot nếu Classifier (CLIP) vẫn bị nhầm lẫn giữa foreground và background. Đây là hướng mở cho nghiên cứu tương lai."
+Key References for Improvement
+SAM 2: Meta AI Segment Anything 2 Repository.
+Grad-CAM: pytorch-gradcam library (Tài liệu hướng dẫn targetting custom similarity scores).
+Lưu ý cực kỳ quan trọng:
+Phần nằm giữa 2 dấu --- ở trên cùng gọi là YAML Frontmatter. Bạn TUYỆT ĐỐI KHÔNG được thêm bớt khoảng trắng (space) ở đầu các dòng trong phần này (như name:, todos:, - id:). Nếu bạn lỡ thụt lề (indent) sai, phần mềm đọc file plan của bạn sẽ báo lỗi. Cứ copy y nguyên từ chữ --- đầu tiên đến chữ --- thứ hai là chuẩn!
